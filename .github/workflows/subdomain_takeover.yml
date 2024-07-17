@@ -2,7 +2,7 @@ name: Subdomain Takeover Detection
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Run daily at midnight UTC
+  - cron: '0 * * * *'
 
 jobs:
   subdomain_takeover:
@@ -61,7 +61,7 @@ jobs:
         SMTP_PORT: 587
         SMTP_USER: ${{ secrets.SMTP_USER }}
         SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        EMAIL_TO: your-email@example.com
+        EMAIL_TO: thedevtask@gmail.com
       run: |
         takeover_detected=$(cat combined_results.txt | wc -l)
         if [ "$takeover_detected" -gt 0 ]; then
