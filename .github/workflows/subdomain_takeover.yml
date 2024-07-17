@@ -1,0 +1,69 @@
+name: Subdomain Takeover Detection
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Run daily at midnight UTC
+
+jobs:
+  subdomain_takeover:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: '1.15'
+
+    - name: Install subfinder
+      run: go get -u -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder
+
+    - name: Install amass
+      run: go get -u -v github.com/OWASP/Amass/v3/...
+
+    - name: Install assetfinder
+      run: go get -u -v github.com/tomnomnom/assetfinder
+
+    - name: Install subjack
+      run: go get -u -v github.com/haccer/subjack
+
+    - name: Install subzy
+      run: go get -u -v github.com/lukasikic/subzy
+
+    - name: Read domains from file
+      id: read_domains
+      run: |
+        DOMAINS=$(cat domains.txt)
+        echo "::set-output name=domains::$DOMAINS"
+
+    - name: Run Subdomain Enumeration and Takeover Check
+      run: |
+        DOMAINS=${{ steps.read_domains.outputs.domains }}
+        for domain in $DOMAINS; do
+          echo "Processing $domain"
+          subfinder -d $domain -o ${domain}_subdomains.txt
+          amass enum -passive -d $domain -o ${domain}_amass.txt
+          assetfinder --subs-only $domain >> ${domain}_assetfinder.txt
+          cat ${domain}_subdomains.txt ${domain}_amass.txt ${domain}_assetfinder.txt | sort -u > ${domain}_all_subdomains.txt
+          subjack -w ${domain}_all_subdomains.txt -t 100 -timeout 30 -o ${domain}_results_subjack.txt -ssl
+          subzy --targets ${domain}_all_subdomains.txt --output ${domain}_results_subzy.txt
+        done
+
+    - name: Combine Results
+      run: |
+        cat *_results_subjack.txt *_results_subzy.txt > combined_results.txt
+
+    - name: Send Notification Email
+      env:
+        SMTP_SERVER: smtp.gmail.com
+        SMTP_PORT: 587
+        SMTP_USER: ${{ secrets.SMTP_USER }}
+        SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        EMAIL_TO: your-email@example.com
+      run: |
+        takeover_detected=$(cat combined_results.txt | wc -l)
+        if [ "$takeover_detected" -gt 0 ]; then
+          echo "Subdomain Takeover Detected" | msmtp --host=$SMTP_SERVER --port=$SMTP_PORT --auth=on --user=$SMTP_USER --passwordeval="echo $SMTP_PASSWORD" --from=$SMTP_USER --tls=on -- $EMAIL_TO
+        fi
