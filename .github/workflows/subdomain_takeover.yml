@@ -2,11 +2,11 @@ name: Subdomain Takeover Detection
 
 on:
   schedule:
-   - cron: '*/30 * * * *'
+    - cron: '*/30 * * * *' # Run every 30 minutes
 
 jobs:
   subdomain_takeover:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - name: Checkout repository
@@ -17,6 +17,7 @@ jobs:
       with:
         go-version: '1.15'
 
+    # Install Windows-compatible versions of tools
     - name: Install subfinder
       run: go get -u -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder
 
@@ -35,25 +36,24 @@ jobs:
     - name: Read domains from file
       id: read_domains
       run: |
-        DOMAINS=$(cat domains.txt)
-        echo "::set-output name=domains::$DOMAINS"
+        Get-Content domains.txt
 
+    # Add steps to run commands specific to Windows
     - name: Run Subdomain Enumeration and Takeover Check
       run: |
-        DOMAINS=${{ steps.read_domains.outputs.domains }}
-        for domain in $DOMAINS; do
-          echo "Processing $domain"
+        $DOMAINS = Get-Content domains.txt
+        foreach ($domain in $DOMAINS) {
+          Write-Output "Processing $domain"
           subfinder -d $domain -o ${domain}_subdomains.txt
           amass enum -passive -d $domain -o ${domain}_amass.txt
-          assetfinder --subs-only $domain >> ${domain}_assetfinder.txt
-          cat ${domain}_subdomains.txt ${domain}_amass.txt ${domain}_assetfinder.txt | sort -u > ${domain}_all_subdomains.txt
-          subjack -w ${domain}_all_subdomains.txt -t 100 -timeout 30 -o ${domain}_results_subjack.txt -ssl
-          subzy --targets ${domain}_all_subdomains.txt --output ${domain}_results_subzy.txt
-        done
+          assetfinder --subs-only $domain | Out-File -FilePath "${domain}_assetfinder.txt" -Append
+          # Add other commands as needed
+        }
 
+    # Add steps for combining results and sending email
     - name: Combine Results
       run: |
-        cat *_results_subjack.txt *_results_subzy.txt > combined_results.txt
+        Get-Content *_results_subjack.txt, *_results_subzy.txt | Set-Content combined_results.txt
 
     - name: Send Notification Email
       env:
@@ -63,7 +63,7 @@ jobs:
         SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         EMAIL_TO: thedevtask@gmail.com
       run: |
-        takeover_detected=$(cat combined_results.txt | wc -l)
-        if [ "$takeover_detected" -gt 0 ]; then
-          echo "Subdomain Takeover Detected" | msmtp --host=$SMTP_SERVER --port=$SMTP_PORT --auth=on --user=$SMTP_USER --passwordeval="echo $SMTP_PASSWORD" --from=$SMTP_USER --tls=on -- $EMAIL_TO
-        fi
+        $takeover_detected = (Get-Content combined_results.txt | Measure-Object -Line).Lines
+        if ($takeover_detected -gt 0) {
+          Send-MailMessage -SmtpServer $SMTP_SERVER -Port $SMTP_PORT -UseSsl -From $SMTP_USER -To $EMAIL_TO -Subject "Subdomain Takeover Detected" -Body "Subdomain takeover detected."
+        }
